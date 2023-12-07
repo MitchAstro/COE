@@ -1,0 +1,112 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Aug  3 12:21:24 2022
+
+@author: c3395360
+"""
+
+import pandas as pd
+from scipy import stats
+import matplotlib.pyplot as plt
+
+
+def main():
+    series_1_path = r"C:\OPVs\Lap experiments\OPV cuves 19-07-2022\US all\No mask\Summary stats for all fingers.csv"
+    series_2_path = r"C:\OPVs\Lap experiments\OPV cuves 19-07-2022\Stirred all\No mask\Summary stats for all fingers.csv"
+    
+    
+    print('These are the normality results for the FIRST series:')
+    df_1 = pd.read_csv(series_1_path)
+    df_1 = df_1[:-4]
+    
+    df_1.loc[:, 'Efficiency: '] = df_1.loc[:, 'Efficiency: '].astype(float)
+    # series_1 = df_1[:-4]['Efficiency: ']
+    
+    
+    qq_plot(df_1['Efficiency: '])
+    histogram(df_1['Efficiency: '])
+    
+    print()
+    print()
+    print('The null hypothesis is that the sample comes from a Gaussian distribution')
+    print(normality_series_check(df_1['Efficiency: '], alpha=0.05))
+    print()
+    print()
+    print()
+    
+    # # series_2 = 
+    print('These are the normality results for the SECOND series:')
+    df_2 = pd.read_csv(series_2_path)
+    df_2 = df_2[:-4]
+    
+    df_2.loc[:, 'Efficiency: '] = df_2.loc[:, 'Efficiency: '].astype(float)
+    # series_1 = df_1[:-4]['Efficiency: ']
+    
+    
+    qq_plot(df_2['Efficiency: '])
+    histogram(df_2['Efficiency: '])
+    
+    print()
+    print()
+    print('The null hypothesis is that the sample comes from a Gaussian distribution')
+    print(normality_series_check(df_2['Efficiency: '], alpha=0.05))
+    print()
+    print()
+    print()
+    print('This is a test of equal variances.  The null hypothesis is that the variances are equal.')
+    
+    p = levene_test(df_1['Efficiency: '], df_2['Efficiency: '])
+    if p>=0.05:
+        print('The null hypothesis is ACCEPTED - standard independent t-test will be performed')
+        equal_variance = True
+    else:
+        print("The null hypothesis is REJECTED - Welch's t-test will be performed")
+        equal_variance = False
+    
+        
+    
+    print()
+    print()
+    print()
+    print()
+    print('This is a t-test of the two sample means')
+    p = t_test(df_1['Efficiency: '], df_2['Efficiency: '], equal_variance)
+    
+    if p >= 0.05:
+        print('The two samples are not significantly different')
+        
+    else:
+        print('The two samples are significantly different')
+    
+
+def levene_test(series_1, series_2):
+    stat_num, p_val = stats.levene(series_1, series_2)
+    return(p_val)
+    
+def qq_plot(series):
+    stats.probplot(series, plot=plt)
+    
+
+def histogram(series):
+    fig, ax = plt.subplots(1,1)
+    ax.hist(series)
+    ax.set_title('Histogram ')    
+    plt.show()
+    
+def normality_series_check(series, alpha=0.05):
+    # Assign output from test to variables, run test of normality in series/sample
+    a,p = stats.shapiro(series)
+    # Reject H0 if p<alpha
+    if p <alpha:
+        return 'The Shapiro-Wilk has REJECTED the null hypothesis'
+    # Accept Ho if p>=alpha
+    else:
+        return 'The Shapiro-Wilk has ACCEPTED the null hypothesis'
+    
+def t_test(series_1, series_2, equal_variance):
+    
+    sta_num, p_val = stats.ttest_ind(series_1, series_2, equal_var=equal_variance)
+    return p_val
+
+
+main()
