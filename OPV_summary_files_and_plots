@@ -1,0 +1,249 @@
+# -*- coding: utf-8 -*-
+"""
+This program takes the solar OPV experimental data and makes JV curves plus two seperate datafiles:
+    1) A summary datefile of all the main measures of the fingers e.g. PCE, shunt resistance etc PLUS 
+    SD, mean and normality of the measurement variable
+    2) A file which has all of the I, V, J and time infor for each finger in it
+"""
+# Import relevant packages
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import glob
+from scipy import stats
+# from scipy.stats import shapiro
+
+# The two following lines can be commented out to stop erroneous errors - do not do unless sure the
+# errors from Python are spurious.  Not recommended.
+# import warnings
+# warnings.filterwarnings("ignore")
+
+# Main function controls the rest of the program
+def main():
+    # Define directory of first group of OPVs
+    directory_1 = r"C:\OPVs\Lap experiments\OPV cuves 19-07-2022\Stirred all\No mask"
+    
+    # Read in the OPV data of the first directory, creat two dataframe - one has all 
+    # data at the top of the text file and the second has all the data at the bottom of the text
+    # file
+    lowest_pce_accepted = 0.1
+    df_top, df_bot = read_in_OPV_data(directory_1, lowest_pce_accepted)
+    
+    # Create a summary table of all of the fingers for the OPV devices
+    # Includes mean/SD/Normality for all applicable variables and identifies best finger
+    df_top = top_df_calc(df_top)
+    
+    # We need to obtain the index location of each of the fingers data to be able to do the JV curves and
+    # any other analysis we may be interested
+    location_OPVs = get_index_IV(df_bot)
+    
+    # Plot the JV curves
+    y_lim=[-4,1]
+    plot_JV_curves(location_OPVs, df_bot, y_lim)
+    
+    
+    # Save the df - df_top is useful on its own as it has main summary stats.  df_bot can be used to later
+    # make average curves and compare with other datasets (planed for the next program)
+    df_top.to_csv('Summary stats for all fingers.csv')
+    df_bot.to_csv('all finger data for I_J_V_time.csv')
+
+
+
+
+# This function reads in the relevant text files and converts them into dataframes for analysis
+# Function splits the 
+def read_in_OPV_data(directory, pce_limit):
+    # Make a list of all the text file pathways within the directory 
+    all_text_files = glob.glob(os.path.join(directory, '*.txt'))
+    
+    # Each text file really has two sections of info that need to be made into two
+    # seperate dataframes
+    
+    # Create two empty to concat top info in text file too - one for info at top and other for info at bottom
+    df_top_all = pd.DataFrame()
+    df_bot_all = pd.DataFrame()
+    
+    # Iterate over the list of text files and combine all of the info into 2 dataframes
+    for file in all_text_files:
+        # Grab the info in the top of the text files, save as a dataframe
+        df_top = pd.read_csv(file, sep='\t', nrows=18)
+        
+        # Grab the info in the bottom part of the text files, save as a dataframe
+        df_bot = pd.read_csv(file, sep='\t', skiprows=21)
+        
+        # Get rid of any fingers with PCE% of 0%
+        if float(df_top.iloc[10, 1]) <pce_limit:
+            print('The following files had less than' + str(pce_limit,)+'% PCE:')
+            print(file)
+            pass
+        
+        # Add the info from text files with PCE>0% to the dataframes
+        else:
+            # Need to create rows to identify which solar run was performed for use in df_bot_all later
+            header_bot = pd.DataFrame(data = [['U (V)', df_top.columns[1]], ['I (A)', df_top.iloc[1,1]], ['J (mA/cm2)', df_top.iloc[5,1]], ['Time (s)', df_top.iloc[2,1]]])
+            header_bot = header_bot.transpose()
+            header_bot.columns = ['U (V)',	'I (A)',	'J (mA/cm2)',	'Time (s)']
+            
+            
+            
+            # First deal with top of text file
+            # Need to transpose the info at top of text file
+            df_top = df_top.transpose()
+            # Identify column names
+            header = df_top.iloc[0]
+            # Get all the info below the header (i.e. column names)
+            df_top = df_top[1:]
+            # Assign the correct 
+            df_top.columns = header
+            # Finally add the info from the top of the text file to the 
+            df_top_all = pd.concat([df_top_all, df_top])
+            
+            
+            # Now deal with bottom of text file
+            df_bot_all = pd.concat([df_bot_all, header_bot])
+            df_bot_all = pd.concat([df_bot_all, df_bot])
+            
+        
+   
+    return df_top_all, df_bot_all
+ 
+
+   
+        
+def top_df_calc(top_df):
+    #Change relevant columns from str to float
+    columns = ['Finger #: ','Test #: ','Area (mm2):', 'Efficiency: ', 'Voc: ','Isc: ','Jsc: ',\
+                'Fill Factor: ','Shunt Resistance: ','Series Resistance: ']
+        
+    # Iterate over the columns we want to do calculations for
+    for c in columns:
+        # Change column type to a float to do numeric functions
+        top_df[c] = top_df[c].astype(float)
+        
+        # Calculate mean, std deviation and check if column has a Guassian function
+        avg = top_df[c].mean()
+        stdev = top_df[c].std()
+        normality = normality_series_check(top_df[c], alpha=0.05) # Call function to check normality
+        
+        # Append column mena, std devaition and normaility to top_df
+        top_df.loc['Mean', c] = avg
+        top_df.loc['Stand Dev', c] = stdev
+        top_df.loc['Normality', c] = normality # NB: Normality may require more anakysis e.g. qq plots, histogram
+
+
+
+
+
+    # Program will now find the 'Hero' finger, and add it again as the final row in the df
+    # Find the max efficiency value - slice off bottom 3 rows in top_df as they are irrelevant
+    max_pce = top_df[:-3]['Efficiency: '].max()
+    
+    # Slice off row/s which matches the best efficiency
+    row = (top_df[top_df['Efficiency: ']==max_pce])
+    # Reset the index so that we can rename the best row index to 'Hero'
+    # By reseting index we pop the index column out to be manipulated - later re-assign as index
+    row.reset_index(inplace=True)
+    # Rename the future index of the best row to hero
+    row.loc[:, 'index'] = 'Hero'
+    # Re-assign the old index, name a column called 'index' as the actual index again
+    row.set_index('index', inplace=True)
+    # Finally concat the row of the best finger back onto the df as the last row
+    top_df = pd.concat([top_df, row])
+    
+    # Fill any blanck spaces with 'n/a' for readability--> can comment out if felt it doesn't improve readability
+    top_df.fillna('n/a', inplace=True)
+    
+    # Return the top_df with all the summary rows appended
+    return(top_df)
+        
+        
+
+   
+# This function tests normaility using the Shapiro-Wilk test.  Option to set significance level 'alpha', default
+# significance level is 0.05 
+def normality_series_check(series, alpha=0.05):
+    # Assign output from test to variables, run test of normality in series/sample
+    a,p = stats.shapiro(series)
+    # Reject H0 if p<alpha
+    if p <alpha:
+        return 'No'
+    # Accept Ho if p>=alpha
+    else:
+        return 'Yes'
+    
+    
+ 
+ 
+# This function gets the index of where each solar run is hidden in the df with all of the 
+# results for each device and finger within the df.  This index's can then be used to access each individual finger.
+# Use of this is demonstrated later when ploting JV curves
+def get_index_IV(df_bot):
+    # reset df index as the index's are not unique in the df'
+    df_bot.reset_index(inplace=True)
+    
+    # Create a sub_df that only hax the start of each finger solar run - 
+    # identified by the line with the column headings repeated
+    sub_df = df_bot[df_bot['U (V)']=='U (V)']
+    # Get the index of all the column headings 
+    index = sub_df.index
+    # Creat an empty list to append the index onto - index is an odd object that is easier to deal with as a list
+    index_list = []
+    # Loop over the index object and append each index to the index list
+    for i in index:
+        index_list.append(i)
+    
+    # We need to know the location of the last line in the df to know when to stop
+    index_list.append(len(df_bot))
+    
+    # Start a list to append the start and stop indexes of each finger in the df
+    location_OPVs = []
+    # Append the index of the start and stop of the data for each finger to location_OPVs - creates a 
+    # list of lists
+    for i in range(0, len(index_list)-1, 1):
+        # Get a temp list to append to to achieve list of lists
+        temp_list = []
+        # Get where th date starts for the finger
+        start = index_list[i]+2
+        # Get where the data stops for the finger
+        stop = index_list[i+1]
+        # Append start and stop to the temp list
+        temp_list.append(start)
+        temp_list.append(stop)
+        # Finally append the location of the finger as a list to the list location_OPVs
+        location_OPVs.append(temp_list)
+        
+    # Return list of lists that contains the location od the OPVs 
+    return location_OPVs
+     
+# This function plots the JV curves for all of the fingers in the dataset
+# It requires the index of the start and stop of the fingers data as a list of lists to be pass
+# as well as the df that contains everysingle df_bot
+def plot_JV_curves(location_OPVs, df_bot, y_lim):
+    
+    fig, ax = plt.subplots(1,1)
+    counter = 0
+    for i in location_OPVs:
+        counter += 1
+        sub_df = df_bot.iloc[i[0]:i[1]]
+        ax.plot(sub_df['U (V)'], sub_df['J (mA/cm2)'], label = str(counter))
+        ax.legend(title = 'Device', prop={'size':7})
+        ax.scatter(sub_df['U (V)'], sub_df['J (mA/cm2)'], marker = '.')
+        ax.set_title('JV curves for stirred active layer, unmasked')
+        ax.set_xlabel('Voltage (V)')
+        ax.set_ylabel('Current Density (mA${\cdot}$cm$^{-2}$)')
+        ax.axhline(y=0, color='black')
+        ax.axvline(x=0, color='black')
+        ax.set_ylim(y_lim)
+        ax.minorticks_on()
+        
+    plt.show()
+    # Use below line to create a higher quality image than the output direct from Python
+    fig.savefig('JV_curves_stirred.jpeg', dpi=500)
+            
+        
+    
+   
+    
+
+
+main()
